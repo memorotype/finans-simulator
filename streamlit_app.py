@@ -113,22 +113,56 @@ st.subheader(T["charts"]["opt_chart"])
 st.pyplot(fig2, use_container_width=True)
 
 # ---- Multi-scenario comparison ----
+# ---- Multi-scenario comparison ----
 st.header(T["charts"]["multi_scen"])
-preset = st.multiselect("Kredi oranları (%)", [0,20,40,60,80,100], default=[0,40,50,60,100])
-rows = []
-for pct in preset:
-    r = pct/100
-    kredi_x = ev_fiyati * r
-    score_x = net_benefit(ev_fiyati, nakit, kredi_x, kredi_faiz, tilgung, masraf_toplam, yatirim_getiri, years=10)
-    rows.append([pct, kredi_x, score_x])
-df_multi = pd.DataFrame(rows, columns=["Kredi(%)","Kredi(€)","NetFayda(€)"])
-st.dataframe(df_multi, use_container_width=True)
 
-fig3, ax3 = plt.subplots()
-ax3.bar(df_multi["Kredi(%)"].astype(str), df_multi["NetFayda(€)"])
-ax3.set_xlabel("Kredi Oranı (%)")
-ax3.set_ylabel("Net Fayda (€)")
-st.pyplot(fig3, use_container_width=True)
+# 1) Seçenekleri ve varsayılanı tanımla
+options = [0, 20, 40, 60, 80, 100]
+user_default = [0, 40, 50, 60, 100]  # 50 burada sorunlu
+
+# 2) Tipleri normalize et (int’e döndür)
+options = [int(x) for x in options]
+user_default = [int(x) for x in user_default]
+
+# 3) default’u options ile kesiştir (olmayanları otomatik at)
+safe_default = [x for x in user_default if x in options]
+
+# 4) multiselect
+preset = st.multiselect("Kredi oranları (%)", options, default=safe_default)
+
+# 5) Seçim boşsa kullanıcıyı yönlendir
+if len(preset) == 0:
+    st.warning("Lütfen en az 1 kredi oranı seçin.")
+else:
+    rows = []
+    for pct in preset:
+        r = pct / 100
+        kredi_x = ev_fiyati * r
+        score_x = net_benefit(
+            ev_fiyati, nakit, kredi_x, kredi_faiz, tilgung,
+            masraf_toplam, yatirim_getiri, years=10
+        )
+
+        # Geçersiz skorlar için güvenlik
+        if score_x < -1e17:
+            score_x = None
+
+        rows.append([pct, kredi_x, score_x])
+
+    df_multi = pd.DataFrame(rows, columns=["Kredi(%)", "Kredi(€)", "NetFayda(€)"])
+
+    st.subheader("Tablo")
+    st.dataframe(df_multi, use_container_width=True)
+
+    if df_multi["NetFayda(€)"].isna().all():
+        st.warning("Bu senaryolarda hesaplanabilir Net Fayda yok (nakit yetersiz olabilir).")
+    else:
+        fig3, ax3 = plt.subplots()
+        plot_vals = df_multi["NetFayda(€)"].fillna(0)
+        ax3.bar(df_multi["Kredi(%)"].astype(str), plot_vals)
+        ax3.set_xlabel("Kredi Oranı (%)")
+        ax3.set_ylabel("Net Fayda (€)")
+        st.pyplot(fig3, use_container_width=True)
 
 # ---- Interest Sweep ----
 st.header(T["charts"]["interest_sweep"])
