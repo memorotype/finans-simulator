@@ -1,184 +1,191 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import math
 import matplotlib.pyplot as plt
+from utils import amortize, optimize_loan_ratio, net_benefit, simulate_interest_sweep, simulate_price_scenarios, to_excel_bytes
+import importlib
 
 st.set_page_config(page_title="Finans Simülatörü", page_icon="🏠", layout="wide")
 
-st.title("🏠 Finansal Konut + Kredi Optimizasyon Simülatörü")
-st.markdown("Kredi – nakit oranlarını optimize eden, grafikli, gelecekteki maliyetleri hesaplayan interaktif uygulama.")
+# ---- Language selector ----
+lang_choice = st.sidebar.selectbox("Dil / Sprache / Language", ["TR","EN","DE"], index=0)
+lang_module = {"TR":"languages.lang_tr", "EN":"languages.lang_en", "DE":"languages.lang_de"}[lang_choice]
+T = importlib.import_module(lang_module).TEXTS
 
-# ---------------------
-# INPUTS
-# ---------------------
-st.sidebar.header("📌 Girdi Bilgileri")
+# ---- Logo ----
+try:
+    st.sidebar.image("assets/logo.png", width=160)
+except Exception:
+    st.sidebar.info(T["ui"]["logo_missing"])
+
+st.title(T["app_title"])
+st.write(T["intro"])
+st.caption(T["ui"]["theme_info"])
+
+# ---- Inputs (with tooltips) ----
+st.sidebar.header(T["sidebar_header"])
 
 ev_fiyati = st.sidebar.number_input(
-    "Ev fiyatı (€)",
-    value=800000,
-    help="Satın almak istediğiniz konutun toplam satış fiyatıdır. Bu tutara arsa + yapı bedeli dahildir. Pazarlık öncesi veya sonrası nihai fiyatı buraya yazmalısınız."
+    T["inputs"]["price_label"], value=800000,
+    help=T["inputs"]["price_help"]
 )
-
 nakit = st.sidebar.number_input(
-    "Toplam nakit (€)",
-    value=1000000,
-    help="Elinizde mevcut olan ve bu satın alma + yatırım işlemlerinde kullanabileceğiniz toplam likit paradır. Banka hesabı, mevduat, nakit vb."
+    T["inputs"]["cash_label"], value=1000000,
+    help=T["inputs"]["cash_help"]
 )
-
 kredi_faiz = st.sidebar.number_input(
-    "Kredi faiz oranı (%)",
-    value=3.5,
-    help="Bankadan çekeceğiniz konut kredisinin yıllık nominal faiz oranıdır. Örn: %3,5 faizli bir kredi için buraya 3.5 yazılır. Almanya’da faiz yıllık nominal verilir."
-) / 100
-
+    T["inputs"]["rate_label"], value=3.5,
+    help=T["inputs"]["rate_help"]
+)/100
 tilgung = st.sidebar.number_input(
-    "Başlangıç Tilgung (%)",
-    value=3.0,
-    help="Tilgung, kredi ana parasından yıllık olarak geri ödemeniz gereken minimum orandır. Örn: %3 Tilgung → Krediyi her yıl %3 azaltırsınız."
-) / 100
-
+    T["inputs"]["tilgung_label"], value=3.0,
+    help=T["inputs"]["tilgung_help"]
+)/100
 kredi_yil = st.sidebar.number_input(
-    "Kredi süresi (yıl)",
-    value=10,
-    help="Kredi sözleşmesindeki faiz sabitleme (Zinsbindung) süresidir. Genelde 5, 10 veya 15 yıl olur. Bu süre boyunca faiziniz sabit kalır."
+    T["inputs"]["term_label"], value=10,
+    help=T["inputs"]["term_help"]
 )
-
 yatirim_getiri = st.sidebar.number_input(
-    "Yıllık net yatırım getirisi (%)",
-    value=2.0,
-    help="Ev alırken cebinizde kalan nakit parayı değerlendirdiğinizi varsayan yıllık net getiridir. Örn: %2 net → düşük riskli yatırım getirisi."
-) / 100
-
+    T["inputs"]["inv_label"], value=2.0,
+    help=T["inputs"]["inv_help"]
+)/100
 ges = st.sidebar.number_input(
-    "Grunderwerbsteuer (%)",
-    value=6.0,
-    help="Ev satın alırken devlete ödenen alım vergisidir. Hessen eyaletinde oran %6’dır. (Ev fiyatının %6’sı kadar vergi ödersiniz.)"
-) / 100
-
+    T["inputs"]["ges_label"], value=6.0,
+    help=T["inputs"]["ges_help"]
+)/100
 noter = st.sidebar.number_input(
-    "Noter + Grundbuch (%)",
-    value=2.0,
-    help="Noter sözleşmesi + tapu/Grundbuch işlemlerinin toplam maliyetidir. Almanya’da genelde fiyatın %1,5–2’si aralığındadır."
-) / 100
-
+    T["inputs"]["notary_label"], value=2.0,
+    help=T["inputs"]["notary_help"]
+)/100
 makler = st.sidebar.number_input(
-    "Makler (%)",
-    value=3.57,
-    help="Gayrimenkul ilanını sunan emlakçı komisyonudur. Almanya’da tüketici işlemlerinde genelde toplam %7,14’ün yarısı (%3,57) alıcı tarafından ödenir."
-) / 100
-
+    T["inputs"]["agent_label"], value=3.57,
+    help=T["inputs"]["agent_help"]
+)/100
 manual_kredi = st.sidebar.number_input(
-    "Manuel kredi miktarı (€)",
-    value=400000,
-    help="Hesaplamalarda kullanmak istediğiniz kredi miktarını burada belirleyirsiniz. Amortizasyon, faiz, kalan borç bu değere göre hesaplanır."
+    T["inputs"]["manual_loan_label"], value=400000,
+    help=T["inputs"]["manual_loan_help"]
 )
 
-# ---------------------
-# COMPUTATION FUNCTIONS
-# ---------------------
-def amortize(loan, faiz, tilgung, months):
-    aylik_faiz = faiz / 12
-    aylik_tilg = tilgung / 12
-    aylik_taksit = loan * (aylik_faiz + aylik_tilg)
+# Common values
+masraf_toplam = ev_fiyati*ges + ev_fiyati*noter + ev_fiyati*makler
 
-    kalan = loan
-    faiz_odeme = 0
-    yillar = []
-    bakiyeler = []
-
-    for i in range(months):
-        f = kalan * aylik_faiz
-        p = aylik_taksit - f
-        kalan -= p
-        faiz_odeme += f
-
-        if i % 12 == 0:
-            yillar.append(i/12)
-            bakiyeler.append(kalan)
-
-    return aylik_taksit, faiz_odeme, max(kalan,0), yillar, bakiyeler
-
-# ---------------------
-# CALCULATE
-# ---------------------
-ay = kredi_yil * 12
-aylik, faiz10, kalan10, yy, borc_grafik = amortize(manual_kredi, kredi_faiz, tilgung, 120)
-
-masraf = ev_fiyati * ges + ev_fiyati * noter + ev_fiyati * makler
+# ---- Core calculations (10Y) ----
+amort = amortize(manual_kredi, kredi_faiz, tilgung, months_total=120)
 pesinat = ev_fiyati - manual_kredi
-kalan_nakit = nakit - pesinat - masraf
+rezerv = nakit - pesinat - masraf_toplam
+fv10 = rezerv * ((1 + yatirim_getiri)**10)
+net10 = fv10 - amort.interest_paid_10y - amort.remaining_balance_10y
 
-fv_nakit = kalan_nakit * ((1 + yatirim_getiri)**10)
-net_fayda = fv_nakit - faiz10 - kalan10
+# ---- Output KPIs ----
+st.header(T["outputs_header"])
+c1,c2,c3 = st.columns(3)
+c1.metric(T["metrics"]["monthly"], f"{amort.monthly_payment:,.2f} €")
+c2.metric(T["metrics"]["int10"], f"{amort.interest_paid_10y:,.2f} €")
+c3.metric(T["metrics"]["rem10"], f"{amort.remaining_balance_10y:,.2f} €")
+st.metric(T["metrics"]["fv10"], f"{fv10:,.2f} €")
+st.metric(T["metrics"]["net"], f"{net10:,.2f} €")
 
-# ---------------------
-# OUTPUT
-# ---------------------
-st.header("📊 Sonuçlar")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Aylık taksit", f"{aylik:,.2f} €")
-col2.metric("10 yılda ödenen faiz", f"{faiz10:,.2f} €")
-col3.metric("10 yıl sonunda kalan kredi", f"{kalan10:,.2f} €")
-
-st.metric("10 yıl sonraki yatırım değeri (FV)", f"{fv_nakit:,.2f} €")
-st.metric("Net Finansal Fayda", f"{net_fayda:,.2f} €")
-
-# ---------------------
-# GRAPH – AMORTIZATION
-# ---------------------
-st.header("📉 Borç Azalım Grafiği")
-
+# ---- Amortization Chart ----
+st.header(T["charts"]["amort"])
 fig, ax = plt.subplots()
-ax.plot(yy, borc_grafik)
+ax.plot(amort.schedule_yearly["Yıl"], amort.schedule_yearly["Kalan Borç"])
 ax.set_xlabel("Yıl")
 ax.set_ylabel("Kalan Borç (€)")
 ax.grid(True)
-st.pyplot(fig)
+st.pyplot(fig, use_container_width=True)
 
-# ---------------------
-# OPTIMIZATION
-# ---------------------
-st.header("🧮 Otomatik En İyi Kredi Oranı Hesabı")
+# ---- Optimization ----
+st.header(T["charts"]["opt_header"])
+best_ratio = optimize_loan_ratio(ev_fiyati, nakit, kredi_faiz, tilgung, masraf_toplam, yatirim_getiri, years=10, step=0.01)
+st.success(f'{T["charts"]["opt_ratio"]}: %{best_ratio*100:.1f}')
 
-def score_for_ratio(r):
-    kredi = ev_fiyati * r
-    pesin = ev_fiyati - kredi
-    nakit_kalan = nakit - pesin - masraf
-    if nakit_kalan < 0:
-        return -1e18
-
-    aylik_o, faiz_10, kalan_10, _, _ = amortize(kredi, kredi_faiz, tilgung, 120)
-    fv = nakit_kalan * ((1 + yatirim_getiri)**10)
-    return fv - faiz_10 - kalan_10
-
-ratios = np.linspace(0, 1, 101)
-scores = [score_for_ratio(r) for r in ratios]
-
-best_idx = int(np.argmax(scores))
-best_ratio = ratios[best_idx]
-
-st.success(f"Optimal kredi oranı: %{best_ratio * 100:.1f}")
-
+# Net fayda - oran eğrisi
+import numpy as np
+ratios = np.linspace(0,1,101)
+scores = [ net_benefit(ev_fiyati, nakit, ev_fiyati*r, kredi_faiz, tilgung, masraf_toplam, yatirim_getiri, years=10)
+           for r in ratios ]
 fig2, ax2 = plt.subplots()
-ax2.plot(ratios * 100, scores)
-ax2.set_xlabel("Kredi Oranı (%)")
+ax2.plot(ratios*100, scores)
+ax2.set_xlabel("% Kredi Oranı")
 ax2.set_ylabel("Net Fayda (€)")
 ax2.grid(True)
-st.subheader("📈 Optimizasyon Grafiği")
-st.pyplot(fig2)
+st.subheader(T["charts"]["opt_chart"])
+st.pyplot(fig2, use_container_width=True)
 
-# ---------------------
-# EXCEL EXPORT
-# ---------------------
-st.header("📥 Excel Çıktısı")
+# ---- Multi-scenario comparison ----
+st.header(T["charts"]["multi_scen"])
+preset = st.multiselect("Kredi oranları (%)", [0,20,40,60,80,100], default=[0,40,50,60,100])
+rows = []
+for pct in preset:
+    r = pct/100
+    kredi_x = ev_fiyati * r
+    score_x = net_benefit(ev_fiyati, nakit, kredi_x, kredi_faiz, tilgung, masraf_toplam, yatirim_getiri, years=10)
+    rows.append([pct, kredi_x, score_x])
+df_multi = pd.DataFrame(rows, columns=["Kredi(%)","Kredi(€)","NetFayda(€)"])
+st.dataframe(df_multi, use_container_width=True)
 
-if st.button("Excel İndir"):
-    df = pd.DataFrame({
-        "Yıl": yy,
-        "Kalan Borç (€)": borc_grafik
-    })
-    df.to_excel("borc_grafik.xlsx", index=False)
-    st.success("Excel başarıyla oluşturuldu! Dosya: borc_grafik.xlsx")
+fig3, ax3 = plt.subplots()
+ax3.bar(df_multi["Kredi(%)"].astype(str), df_multi["NetFayda(€)"])
+ax3.set_xlabel("Kredi Oranı (%)")
+ax3.set_ylabel("Net Fayda (€)")
+st.pyplot(fig3, use_container_width=True)
+
+# ---- Interest Sweep ----
+st.header(T["charts"]["interest_sweep"])
+colA, colB, colC = st.columns(3)
+rate_min = colA.number_input("Min Faiz (%)", value=3.0)/100
+rate_max = colB.number_input("Maks Faiz (%)", value=5.0)/100
+rate_step = colC.number_input("Adım (%)", value=0.25)/100
+opt_each = st.checkbox("Her faiz noktasında krediyi optimize et", value=False)
+
+df_sweep = simulate_interest_sweep(ev_fiyati, nakit, manual_kredi,
+                                   rate_min, rate_max, rate_step,
+                                   tilgung, masraf_toplam,
+                                   yatirim_getiri, years=10,
+                                   optimize_each_rate=opt_each)
+st.dataframe(df_sweep, use_container_width=True)
+fig4, ax4 = plt.subplots()
+ax4.plot(df_sweep["Faiz"]*100, df_sweep["NetFayda"], marker="o")
+ax4.set_xlabel("Faiz (%)")
+ax4.set_ylabel("Net Fayda (€)")
+ax4.grid(True)
+st.pyplot(fig4, use_container_width=True)
+
+# ---- Price Scenarios ----
+st.header(T["charts"]["price_scen"])
+growth_input = st.text_input("Yıllık büyüme senaryoları (%), virgülle ayır (örn: 0,2,4,6)", value="0,2,4,6")
+growth_list = []
+try:
+    growth_list = [float(x.strip()) for x in growth_input.split(",") if x.strip()!=""]
+except:
+    st.warning("Büyüme listesi parse edilemedi. Örn: 0,2,4,6")
+if growth_list:
+    df_price = simulate_price_scenarios(ev_fiyati, growth_list, manual_kredi,
+                                        kredi_faiz, tilgung, masraf_toplam,
+                                        nakit, yatirim_getiri, years=10)
+    st.dataframe(df_price, use_container_width=True)
+    fig5, ax5 = plt.subplots()
+    ax5.plot(df_price["Büyüme(%)"], df_price["Net Servet 10Y"], marker="o")
+    ax5.set_xlabel("Yıllık Büyüme (%)")
+    ax5.set_ylabel("Net Servet (10Y) (€)")
+    ax5.grid(True)
+    st.pyplot(fig5, use_container_width=True)
+
+# ---- Excel Export ----
+st.header(T["excel_header"])
+dfs_to_export = {
+    "Amort_Monthly": amort.schedule_monthly,
+    "Amort_Yearly": amort.schedule_yearly
+}
+if growth_list:
+    dfs_to_export["Price_Scenarios"] = df_price
+dfs_to_export["Interest_Sweep"] = df_sweep
+dfs_to_export["Multi_Ratios"] = df_multi
+
+xlsx_bytes = to_excel_bytes(dfs_to_export)
+st.download_button(
+    label=T["excel_btn"],
+    data=xlsx_bytes,
+    file_name="finans_simulator_10Y.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
