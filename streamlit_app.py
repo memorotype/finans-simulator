@@ -14,20 +14,65 @@ st.markdown("Kredi – nakit oranlarını optimize eden, grafikli, gelecekteki m
 # ---------------------
 st.sidebar.header("📌 Girdi Bilgileri")
 
-ev_fiyati = st.sidebar.number_input("Ev fiyatı (€)", value=800000)
-nakit = st.sidebar.number_input("Toplam nakit (€)", value=1000000)
+ev_fiyati = st.sidebar.number_input(
+    "Ev fiyatı (€)",
+    value=800000,
+    help="Satın almak istediğiniz konutun toplam satış fiyatıdır. Bu tutara arsa + yapı bedeli dahildir. Pazarlık öncesi veya sonrası nihai fiyatı buraya yazmalısınız."
+)
 
-kredi_faiz = st.sidebar.number_input("Kredi faiz oranı (%)", value=3.5) / 100
-tilgung = st.sidebar.number_input("Başlangıç Tilgung (%)", value=3.0) / 100
-kredi_yil = st.sidebar.number_input("Kredi süresi (yıl)", value=10)
+nakit = st.sidebar.number_input(
+    "Toplam nakit (€)",
+    value=1000000,
+    help="Elinizde mevcut olan ve bu satın alma + yatırım işlemlerinde kullanabileceğiniz toplam likit paradır. Banka hesabı, mevduat, nakit vb."
+)
 
-yatirim_getiri = st.sidebar.number_input("Yıllık net yatırım getirisi (%)", value=2.0) / 100
+kredi_faiz = st.sidebar.number_input(
+    "Kredi faiz oranı (%)",
+    value=3.5,
+    help="Bankadan çekeceğiniz konut kredisinin yıllık nominal faiz oranıdır. Örn: %3,5 faizli bir kredi için buraya 3.5 yazılır. Almanya’da faiz yıllık nominal verilir."
+) / 100
 
-ges = st.sidebar.number_input("Grunderwerbsteuer (%)", value=6.0) / 100
-noter = st.sidebar.number_input("Noter + Grundbuch (%)", value=2.0) / 100
-makler = st.sidebar.number_input("Makler (%)", value=3.57) / 100
+tilgung = st.sidebar.number_input(
+    "Başlangıç Tilgung (%)",
+    value=3.0,
+    help="Tilgung, kredi ana parasından yıllık olarak geri ödemeniz gereken minimum orandır. Örn: %3 Tilgung → Krediyi her yıl %3 azaltırsınız."
+) / 100
 
-manual_kredi = st.sidebar.number_input("Manuel kredi miktarı (€)", value=400000)
+kredi_yil = st.sidebar.number_input(
+    "Kredi süresi (yıl)",
+    value=10,
+    help="Kredi sözleşmesindeki faiz sabitleme (Zinsbindung) süresidir. Genelde 5, 10 veya 15 yıl olur. Bu süre boyunca faiziniz sabit kalır."
+)
+
+yatirim_getiri = st.sidebar.number_input(
+    "Yıllık net yatırım getirisi (%)",
+    value=2.0,
+    help="Ev alırken cebinizde kalan nakit parayı değerlendirdiğinizi varsayan yıllık net getiridir. Örn: %2 net → düşük riskli yatırım getirisi."
+) / 100
+
+ges = st.sidebar.number_input(
+    "Grunderwerbsteuer (%)",
+    value=6.0,
+    help="Ev satın alırken devlete ödenen alım vergisidir. Hessen eyaletinde oran %6’dır. (Ev fiyatının %6’sı kadar vergi ödersiniz.)"
+) / 100
+
+noter = st.sidebar.number_input(
+    "Noter + Grundbuch (%)",
+    value=2.0,
+    help="Noter sözleşmesi + tapu/Grundbuch işlemlerinin toplam maliyetidir. Almanya’da genelde fiyatın %1,5–2’si aralığındadır."
+) / 100
+
+makler = st.sidebar.number_input(
+    "Makler (%)",
+    value=3.57,
+    help="Gayrimenkul ilanını sunan emlakçı komisyonudur. Almanya’da tüketici işlemlerinde genelde toplam %7,14’ün yarısı (%3,57) alıcı tarafından ödenir."
+) / 100
+
+manual_kredi = st.sidebar.number_input(
+    "Manuel kredi miktarı (€)",
+    value=400000,
+    help="Hesaplamalarda kullanmak istediğiniz kredi miktarını burada belirleyirsiniz. Amortizasyon, faiz, kalan borç bu değere göre hesaplanır."
+)
 
 # ---------------------
 # COMPUTATION FUNCTIONS
